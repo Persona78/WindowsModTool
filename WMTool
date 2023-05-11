@@ -1,0 +1,518 @@
+@echo off
+title Windows Modding tool - ESD type
+setlocal  EnableDelayedExpansion
+
+REM --> Requesting administrative privileges
+:-------------------------------------
+REM  --> Check for permissions
+    IF "%PROCESSOR_ARCHITECTURE%" EQU "amd64" (
+>nul 2>&1 "%SYSTEMROOT%\SysWOW64\cacls.exe" "%SYSTEMROOT%\SysWOW64\config\system"
+) ELSE (
+>nul 2>&1 "%SYSTEMROOT%\system32\cacls.exe" "%SYSTEMROOT%\system32\config\system"
+)
+
+REM --> If error flag set, there is no administrative privileges.
+if '%errorlevel%' NEQ '0' (
+    @echo. & @echo [91mRequesting administrative privileges...[0m
+	TIMEOUT -T 3 /nobreak >nul
+    goto UACPrompt
+) else ( goto gotAdmin )
+
+:UACPrompt
+    echo Set UAC = CreateObject^("Shell.Application"^) > "%temp%\getadmin.vbs"
+    set params= %*
+    echo UAC.ShellExecute "cmd.exe", "/c ""%~s0"" %params:"=""%", "", "runas", 1 >> "%temp%\getadmin.vbs"
+
+    "%temp%\getadmin.vbs"
+    del "%temp%\getadmin.vbs"
+    exit /b
+	
+
+:gotAdmin
+REM --> Changing the working DIR
+CD /d "%~dp0"
+cls
+title Windows Modding tool - ESD type
+
+@echo. & @echo                                      [44m[93m= Windows Modding tool =[0m
+@echo. & @echo. 
+@echo                  FUNCTION                     OPTION
+@echo.
+@echo  [41mPreparing and extracting img[0m                  [93m- 1[0m
+@echo  [42mMount Windows image[0m                           [93m- 2[0m
+@echo  [43mEnable Disable Windows Optional Feature[0m       [93m- 3[0m
+@echo  [45mAdd/remove Apps at Offline Windows Image[0m      [93m- 4[0m
+@echo  [44mTweak Regestry[0m                                [93m- 5[0m
+@echo  [46mDismount Windows Image[0m                        [93m- 6[0m
+@echo  [34m[47mSplit Windows Image to be supported on FAT32[0m  [93m- 7[0m
+@echo  [44m[33mClean all after work done[0m                     [93m- 8[0m
+@echo  [91mEXIT[0m                                          [93m- 9[0m
+@echo. & Set /p sel=" Insert Option number: "
+if %sel% EQU 0 goto gotAdmin
+If %sel% EQU 1 goto img
+If %sel% EQU 2 goto mount
+If %sel% EQU 3 goto Optional
+If %sel% EQU 4 goto select
+If %sel% EQU 5 goto reg
+If %sel% EQU 6 goto Dismount
+If %sel% EQU 7 goto Split
+If %sel% EQU 8 goto clean
+If %sel% EQU 9 EXIT /b
+if %sel% GTR 9 goto gotAdmin
+
+:img
+cls
+title Preparing and extracting img
+DISM /Get-WimInfo /WimFile:"%~dp0sources\install.esd"
+@echo. & set /p index=" Type Image Index number to extract image: " & @echo.
+mkdir "%~dp0ISO"
+mkdir "%userprofile%\Desktop\install.esd_backup"
+@echo [32mStarting Backup from original install.esd to %userprofile%\Desktop[0m
+@echo [91mTo rollbackp restore install.esd from %userprofile%\Desktop\install.esd_backup in to %~dp0sources folder.[0m & @echo.
+copy "%~dp0sources\install.esd" "%userprofile%\Desktop\install.esd_backup\install.esd" /v
+@echo [32mExporting image to %~dp0ISO.[0m & @echo.
+DISM /export-image /SourceImageFile:"%~dp0sources\install.esd" /SourceIndex:%index% /DestinationImageFile:"%~dp0ISO\install.esd" /Compress:max /CheckIntegrity
+@echo.
+pause
+goto gotAdmin
+
+::---------------------------------------------------------------------------------------------------------------
+
+:mount
+cls
+title Mount Windows image
+@echo. & @echo [32mMounting install.esd image...[0m & @echo.
+del /F /S /Q "%~dp0sources\install.esd" >nul
+move /y "%~dp0ISO\install.esd"  "%~dp0sources\install.esd"
+mkdir "%~dp0PATH" & @echo.
+DISM /mount-wim /wimfile:"%~dp0sources\install.esd" /mountdir:"%~dp0PATH" /index:1 /CheckIntegrity
+@echo. & @echo.
+
+:Ask
+set /p ask= " type 1 to add a key, type 0 to exite: "
+if %ask% EQU 0 (goto gotAdmin)
+if %ask% EQU 1 (goto key)
+if %ask% GTR 1 cls & goto Ask
+
+:key
+set /p key=" Insert Windows Key here if you have it: "
+DISM /Image:"%~dp0PATH" /Set-ProductKey:%key%
+@echo. & pause
+goto gotAdmin
+
+::---------------------------------------------------------------------------------------------------------------
+
+:Optional
+cls
+title Enable/Disable Windows Optional Feature
+@echo. & @echo [32mEnable/Disable Windows Optional Features.[0m & @echo.
+:get-features
+@echo. [33m
+powershell.exe Get-WindowsOptionalFeature -Path "%~dp0PATH" > WindowsOptionalFeature.txt
+:WindowsOptionalFeature
+type WindowsOptionalFeature.txt
+@echo. [0m
+set /p Feature="- Select, copy and paste Optional Feature name here or type 0 to exit: "
+if %Feature% EQU 0 (goto gotAdmin) else (goto next)
+:next
+@echo.
+set /p state="- Write [32mEnable[0m or [31mdisable[0m here- "
+powershell.exe %state%-WindowsOptionalFeature -Path "%~dp0PATH" -All -FeatureName "%Feature%"
+@echo. & pause
+Set /p choice=" 1 to continue; 0 to exit: "
+if %choice% EQU 0 goto gotAdmin
+if %choice% EQU 1 goto Optional
+if %choice% GTR 1 cls & goto Optional
+
+
+::----------------------------------------------------------------------------------------------------------------
+
+:select
+cls
+title Add/remove Apps at Offline Windows Image
+@echo. & @echo [43m[31mAdd apps to offline Windows image. [4m[1mImage must be mounted![0m
+@echo. & @echo [41mOpenning Windows App Store...[0m & @echo Press any key to coninue... & pause >nul
+start "windows_app_store" https://www.microsoft.com/pt-pt/store/apps/windows
+@echo. & @echo [1mFind your app and copy link.[0m
+@echo. & @echo [41mOppening https://store.rg-adguard.net/ to [1m[4mget app link to download without install it.[0m & @echo Press any key to coninue... & pause >nul
+start "store_rg-adguard.net/" https://store.rg-adguard.net/
+@echo. & @echo [1m[31 PPaste the link you copy from App Store in store.rg-adguard.net link bar, select Retail and search links.[0m
+@echo. & @echo [1mDownload to desktop [1m[4m[31mthe right [103mappx or appxbundle[0m [31mversion that match your windows version[0m, example for Windows 64 bits download x64 [31m[103mappx or appxbundle[0m version.
+@echo [33m Note: * If download doesn t show the extencion just paste the name, to check extencion do right click and check app propertys.
+@echo * Some apps have more than 1 package, The app package and its dependencies like Frameworks or VClibs as example.[0m
+@echo. & @echo Press any key to Start
+pause >nul
+
+rem https://www.microsoft.com/store/productId/9NJHK44TTKSX        Amazon App Store
+rem Lets start...
+
+:repeat
+cls
+@echo. & @echo [31mReading Apps list...[0m & @echo.
+DISM /Image:"%~dp0PATH" /Get-ProvisionedAppxPackages >ProvisionedAppxPackages.txt
+IF %ERRORLEVEL% NEQ 0 goto repeat else goto Packages
+:Packages
+@echo. & @echo Installed packages:
+type %~dp0ProvisionedAppxPackages.txt
+@echo. [33m
+Set /p option=" Type 1 to remove Appx Packages, type 2 to add Appx Packages, type 3 to main menu: "
+if %option% LSS 1 goto repeat
+if %option% EQU 1 (goto remove)
+if %option% EQU 2 (goto add)
+if %option% EQU 3 (goto gotAdmin)
+if %option% GTR 3 goto repeat
+@echo. [0m
+
+:remove
+@echo. [31m
+set /p remove=" Type/paste Appx Package name here: "
+DISM /Image:%~dp0PATH /Remove-ProvisionedAppxPackage /PackageName:%remove%
+@echo. [0m & @echo Press any key to remove more apps!
+pause >nul
+goto repeat
+
+
+:add
+@echo.
+@echo [44mAdding the Apps...[0m
+@echo. [33m
+set /p app=" Type/Paste the downloaded app name and extension here and press ENTER: "
+@echo.
+Dism /Image:%~dp0PATH /Add-ProvisionedAppxPackage /PackagePath:%userprofile%\Desktop\%app% /SkipLicense /Region:"all"
+@echo. [0m & @echo Press any key to add more apps!
+pause >nul
+goto repeat
+
+::--------------------------------------------------------------------------------------------------------------------------
+
+:reg
+cls
+title Tweak Regestry
+
+@ECHO. & @ECHO [33mTweaking System regestry.[0m
+reg load HKLM\MODSYSTEM PATH\Windows\System32\config\SYSTEM
+
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name 'MTU' -PropertyType dword -Value 1452 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\NUMA' -Name 'SplitLargeNodes' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name EnableTCPA -PropertyType dword -Value 1 -force
+powershell.exe new-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name DefaultTTL -PropertyType dword -Value 60 -force
+powershell.exe new-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters' -Name 'SackOpts' -PropertyType dword -Value 0 -force
+powershell.exe new-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name Tcp1323Opts -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name DisableTaskOffload -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name EnablePMTUBHDetect -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name EnablePMTUDiscovery -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name EnableDeadGWDetect -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name 'DisableLargeMTU' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name TcpMaxConnectRetransmissions -PropertyType dword -Value 2 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name TCPMaxDataRetransmissions -PropertyType dword -Value 3 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name SynAttackProtect -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name EnableConnectionRateLimiting -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters -Name EnableDca -PropertyType dword -Value 1 -force
+powershell.exe New-Item -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip' -Name 'QoS' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\services\Tcpip\QoS' -Name 'Do not use NLA' -PropertyType string -Value 0 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\LanmanWorkstation\Parameters' -Name 'DisableLargeMTU' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\LanmanWorkstation\Parameters' -Name 'Size' -PropertyType dword -Value 3 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\LanmanWorkstation\Parameters' -Name 'SizReqBuf' -PropertyType dword -Value 34848 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\LanmanWorkstation\Parameters' -Name 'IRPStackSize' -PropertyType dword -Value 33 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\LanmanWorkstation\Parameters' -Name 'RequireSecuritySignature' -PropertyType dword -Value 1 -force
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\LanmanServer\Parameters' -Name 'DisableLargeMTU' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\LanmanServer\Parameters' -Name 'Size' -PropertyType dword -Value 3 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\LanmanServer\Parameters' -Name 'SizReqBuf' -PropertyType dword -Value 34848 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\LanmanServer\Parameters' -Name 'IRPStackSize' -PropertyType dword -Value 33 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\LanmanServer\Parameters' -Name 'MinFreeConnections' -PropertyType dword -Value 256 -force
+
+rem powershell.exe Remove-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\AFD\Parameters' -Name 'DefaultReceiveWindow' >nul
+rem powershell.exe Remove-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -Name 'DefaultReceiveWindow' >nul
+rem powershell.exe Remove-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Netbt\Parameters' -Name 'DefaultReceiveWindow' >nul
+rem powershell.exe Remove-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\AFD\Parameters' -Name 'DefaultSendWindow' >nul
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters' -Name TcpTimedWaitDelay -PropertyType dword -Value 20 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters' -Name 'MaxUserPort' -PropertyType dword -Value 49150 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters' -Name 'TcpNumConnections' -PropertyType dword -Value 65534 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters' -Name 'MaxFreeTcbs' -PropertyType dword -Value 46811 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters' -Name 'EnableSecurityFilters' -PropertyType dword -Value 1 -force"
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\ServiceProvider' -Name 'Class' -PropertyType dword -Value 2 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\ServiceProvider' -Name 'LocalPriority' -PropertyType dword -Value 4 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\ServiceProvider' -Name 'HostsPriority' -PropertyType dword -Value 5 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\ServiceProvider' -Name 'DnsPriority' -PropertyType dword -Value 6 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\ServiceProvider' -Name 'NetbtPriority' -PropertyType dword -Value 7 -force
+
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\services\NDIS\Parameters -Name RssBaseCpu -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\services\NDIS\Parameters -Name MaxNumRssCpus -PropertyType dword -Value 2 -force
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Power\EnergyEstimation\CPU\EfficiencyClass\0\PowerCurve\0' -Name 'FrequencyPercent' -PropertyType dword -Value 10 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Power\EnergyEstimation\CPU\EfficiencyClass\1\PowerCurve\0' -Name 'FrequencyPercent' -PropertyType dword -Value 10 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Power\EnergyEstimation\Display' -Name 'DisplayBacklightPowerQDenominator' -PropertyType dword -Value 40 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\services\NDIS\Parameters -Name AllowFlowControlUnderDebugger -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path HKLM:\MODSYSTEM\ControlSet001\services\NDIS\Parameters -Name ProcessorAffinityMask -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Session Manager\kernel' -Name MaximumDpcQueueDepth -PropertyType dword -Value 1 -force
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Session Manager\Memory Management' -Name FeatureSettingsOverride -PropertyType dword -Value 1024 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Session Manager\Memory Management' -Name FeatureSettingsOverrideMask -PropertyType dword -Value 1024 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Session Manager\Memory Management\PrefetchParameters' -Name 'EnablePrefetcher' -PropertyType dword -Value 0 -force 
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Session Manager\Memory Management' -Name 'ThirdLevelDataCache' -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Session Manager\Memory Management' -Name 'LargeSystemCache' -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Session Manager\Memory Management' -Name 'PagedPoolSize' -PropertyType dword -Value 192000000 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Session Manager\Memory Management' -Name 'SystemPages' -PropertyType dword -Value 0 -force
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\FileSystem' -Name 'NtfsDisableLastAccessUpdate' -PropertyType dword -Value 2147483651 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\StorageManagement\SpacesSMP\ConnectedSubsystems\*' -Name 'CacheEnabled' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Session Manager\Power' -Name 'HiberBootEnabled' -PropertyType dword -Value 0 -force
+
+powershell.exe New-Item -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Power' -Name 'PowerThrottling' -force -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Power\PowerThrottling' -Name 'PowerThrottlingOff' -PropertyType dword -Value 1 -force
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\intelppm' -Name 'Start'  -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\intelpmax' -Name 'Start'  -PropertyType dword -Value 1 -force
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Power' -Name 'CsEnabled'  -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\FileSystem' -Name 'NtfsMemoryUsage'  -PropertyType dword -Value 2 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Power' -Name 'Class1InitialUnparkCount'  -PropertyType dword -Value 48 -force
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Session Manager\SubSystems' -Name 'SharedSection'  -PropertyType string -Value '2048,2048,2048' -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\PriorityControl' -Name 'Win32PrioritySeparation'  -PropertyType dword -Value 38 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\GraphicsDrivers' -Name 'HwSchMode'  -PropertyType dword -Value 2 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\CrashControl' -Name 'AutoReboot' -PropertyType dword -Value 0 -force  
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Session Manager\Power' -Name 'HybridBootAnimationTime' -PropertyType dword -Value 600 -force
+powershell.exe New-Item -Path 'HKLM:\MODSYSTEM\ControlSet001\Control' -Name 'KernelVelocity' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\KernelVelocity' -Name 'DisableFGBoostDecay' -PropertyType dword -Value 0 -force
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Tcpip\Parameters' -Name 'EnableWsd' -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Services\Ndu' -Name 'Start' -PropertyType dword -Value 4 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\GraphicsDrivers' 'HwSchMode' -PropertyType dword -Value '2' -force
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\DeviceGuard' -Name 'EnableVirtualizationBasedSecurity' -PropertyType dword -Value 1 -force
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\DeviceGuard' -Name 'RequireMicrosoftSignedBootChain' -PropertyType dword -Value 1 -force
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\DeviceGuard' -Name 'RequirePlatformSecurityFeatures' -PropertyType dword -Value 3 -force
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\DeviceGuard' -Name 'Locked' -PropertyType dword -Value 0 -force
+rem powershell.exe New-Item -Path 'HKLM:\MODSYSTEM\ControlSet001\Control' -Name 'DeviceGuard' -ErrorAction SilentlyContinue
+rem powershell.exe New-Item -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\DeviceGuard' -Name 'Scenarios' -ErrorAction SilentlyContinue
+rem powershell.exe New-Item -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\DeviceGuard\Scenarios' -Name 'HypervisorEnforcedCodeIntegrity' -ErrorAction SilentlyContinue
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name 'Enabled' -PropertyType dword -Value 1 -force
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name 'WasEnabledBy' -PropertyType dword -Value 1 -force
+rem powershell.exe New-Item -Path 'HKLM:\\MODSYSTEM\ControlSet001\Control' -Name 'Lsa' -ErrorAction SilentlyContinue
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\Lsa' -Name 'RunAsPPL' -PropertyType dword -Value 2 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSYSTEM\ControlSet001\Control\StorageManagement\SpacesSMP\ConnectedSubsystems\*' -Name 'CacheEnabled' -PropertyType dword -Value 1 -force 
+
+
+@echo. & @ECHO [33mTweaking Software regestry.[0m & @echo.
+reg load HKLM\MODSOFTWARE PATH\Windows\System32\config\SOFTWARE
+
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion' -Name 'Themes' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Themes' -Name 'Personalize' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'EnableTransparency' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'ColorPrevalence' -PropertyType dword -Value 1 -force
+
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion' -Name 'Explorer' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Themes' -Name 'Advanced' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'UseOLEDTaskbarTransparency' -PropertyType dword -Value 1 -force
+
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Explorer' -Name 'VisualEffects' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' -Name 'FontSmoothing' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects\FontSmoothing' -Name 'DefaultApplied' -PropertyType dword -Value 1 -force
+
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows' -Name 'Dwm' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\Dwm' -Name 'DisableHologramCompositor' -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\Dwm' -Name 'EnableAeroPeek' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\Dwm' -Name 'ForceEffectMode' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\Dwm' -Name 'EnableWindowColorization' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\Dwm' -Name 'MaxD3DFeatureLevel' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\Dwm' -Name 'OneCoreNoDWMRawGameController' -PropertyType dword -Value 1 -force
+
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows' -Name 'Psched' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows\Psched' -Name 'NonBestEffortLimit' -PropertyType dword -Value 5 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows\Psched' -Name 'MaxOutstandingSends' -PropertyType dword -Value 196605 -force
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' -Name NetworkThrottlingIndex -PropertyType dword -Value 4294967295 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' -Name SystemResponsiveness -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name Affinity -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'Background Only' -PropertyType string -Value False -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name Priority -PropertyType dword -Value 2 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'Scheduling Category' -PropertyType string -Value High -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'SFIO Priority' -PropertyType string -Value High -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'Latency Sensitive' -PropertyType string -Value True -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name NetworkThrottling -PropertyType dword -Value 4294967295 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'Clock Rate' -PropertyType dword -Value 10000 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'GPU Priority' -PropertyType dword -Value 8 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks' -Name 'Low Latency' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Low Latency' -Name Affinity -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Low Latency' -Name 'Background Only' -PropertyType string -Value False -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Low Latency' -Name 'Priority' -PropertyType dword -Value 2 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Low Latency' -Name 'Scheduling Category' -PropertyType string -Value High -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Low Latency' -Name 'SFIO Priority' -PropertyType string -Value Normal -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Low Latency' -Name 'Latency Sensitive' -PropertyType string -Value True -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Low Latency' -Name NetworkThrottling -PropertyType dword -Value 4294967295 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Low Latency' -Name 'Clock Rate' -PropertyType dword -Value 10000 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Low Latency' -Name 'GPU Priority' -PropertyType dword -Value 8 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio' -Name Affinity -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio' -Name 'Background Only' -PropertyType string -Value False -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio' -Name Priority -PropertyType dword -Value 5 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio' -Name 'Scheduling Category' -PropertyType string -Value medium -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio' -Name 'SFIO Priority' -PropertyType string -Value Normal -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio' -Name 'Latency Sensitive' -PropertyType string -Value True -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio' -Name NetworkThrottling -PropertyType dword -Value 4294967295 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio' -Name 'Clock Rate' -PropertyType dword -Value 10000 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio' -Name 'GPU Priority' -PropertyType dword -Value 8 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio' -Name Affinity -PropertyType dword -Value 0 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio' -Name 'Background Only' -PropertyType string -Value False -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio' -Name Priority -PropertyType dword -Value 6 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio' -Name 'Scheduling Category' -PropertyType string -Value medium -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio' -Name 'SFIO Priority' -PropertyType string -Value Normal -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio' -Name 'Latency Sensitive' -PropertyType string -Value True -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio' -Name NetworkThrottling -PropertyType dword -Value 4294967295 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio' -Name 'Clock Rate' -PropertyType dword -Value 10000 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio' -Name 'GPU Priority' -PropertyType dword -Value 8 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching' -Name 'SearchOrderConfig' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR' -Name 'Value' -PropertyType dword -Value 0 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\PolicyManager' -Name 'current' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\PolicyManager\current' -Name 'device' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\PolicyManager\current\device' -Name 'Education' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\PolicyManager\current\device\Education' -Name 'EnableEduThemes' -PropertyType dword -Value 1 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\PolicyManager\current\device' -Name 'Stickers' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\PolicyManager\current\device\Stickers' -Name 'EnableStickers' -PropertyType dword -Value 1 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\PolicyManager\current\device' -Name 'Gaming' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\PolicyManager\current\device\Gaming' -Name 'EnableGaming' -PropertyType dword -Value 1 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\PolicyManager\current\device' -Name 'Performance' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\PolicyManager\current\device\Performance' -Name 'EnableHighPerformance' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'UseOLEDTaskbarTransparency' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' -Name 'NoLazyMode' -PropertyType dword -Value 1 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name 'Image File Execution Options' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows' -Name 'NvCache' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows\NvCache' -Name 'EnableNvCache' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows\NvCache' -Name 'EnableSolidStateMode' -PropertyType dword -Value 0 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft' -Name 'MicrosoftEdge' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\MicrosoftEdge' -Name 'BrowserEmulation' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\MicrosoftEdge\BrowserEmulation' -Name 'MSCompatibilityMode' -PropertyType dword -Value 1 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\MicrosoftEdge' -Name 'Main' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\MicrosoftEdge\Main' -Name 'AllowPrelaunch' -PropertyType dword -Value 0 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Google\Chrome' -Name 'Main' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Google\Chrome\Main' -Name 'AllowPrelaunch' -PropertyType dword -Value 0 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Google\Chrome' -Name 'BrowserEmulation' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Google\Chrome\BrowserEmulation' -Name 'MSCompatibilityMode' -PropertyType dword -Value 1 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows' -Name 'App Management' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows\App Management' -Name 'COMClassStore' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows\WcmSvc\GroupPolicy' -Name 'fMinimizeConnections' -PropertyType dword -Value 1 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows' -Name 'Wireless' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows\Wireless' -Name 'NetCost' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows\Wireless\NetCost' -Name 'Cost' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows\Network Connections' -Name 'Cost' -PropertyType dword -Value 1 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation' -Name 'DisableStartupSound' -PropertyType dword -Value 0 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name 'EMDMgmt' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\EMDMgmt' -Name '*' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\EMDMgmt\*' -Name 'DeviceStatus' -PropertyType dword -Value 2 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\EMDMgmt\*' -Name 'WriteSpeedKBs' -PropertyType dword -Value 2048 -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\EMDMgmt\*' -Name 'SpeedReadKBs' -PropertyType dword -Value 2048 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows' -Name 'WindowsUpdate' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' -Name 'ExcludeWUDriversInQualityUpdate' -PropertyType dword -Value 0 -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Dfrg' -Name 'BootOptimizeFunction' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Dfrg\BootOptimizeFunction' -Name 'Enable' -PropertyType string -Value 'N' -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion' -Name 'Policies' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Policies' -Name 'System' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'legalnoticecaption' -PropertyType String -Value 'Windows 11 Light edition MOD' -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'legalnoticetext' -PropertyType String -Value 'By Persona78' -force
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft' -Name 'WindowsInkWorkspace' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\WindowsInkWorkspace' -Name 'AllowWindowsInkWorkspace' -PropertyType dword -Value 1 -force
+
+rem powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft' -Name 'Windows Defender' -ErrorAction SilentlyContinue
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender' -Name 'DisableAntiSpyware' -PropertyType dword -Value '0' -force
+
+rem powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender' -Name 'MpEngine' -ErrorAction SilentlyContinue
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender\MpEngine' -Name 'MpCloudBlockLeve' -PropertyType dword -Value '2' -force
+
+rem powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender' -Name 'NIS' -ErrorAction SilentlyContinue
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender\NIS' -Name 'DisableProtocolRecognition' -PropertyType dword -Value '0' -force
+
+rem powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options' -Name 'LSASS.exe' -ErrorAction SilentlyContinue
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\LSASS.exe' -Name 'AuditLevel' -PropertyType dword -Value 8 -force
+
+rem powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender' -Name 'Real-Time Protection' -ErrorAction SilentlyContinue
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableScriptScanning' -PropertyType dword -Value '0' -force
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableIOAVProtection' -PropertyType dword -Value '0' -force
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableOnAccessProtection' -PropertyType dword -Value '0' -force
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'RealtimeScanDirection' -PropertyType dword -Value '1' -force
+
+rem powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender' -Name 'Scan' -ErrorAction SilentlyContinue
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender\Scan' -Name 'DisableEmailScanning' -PropertyType dword -Value '0' -force
+rem powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows Defender\Scan' -Name 'DisableHeuristics' -PropertyType dword -Value '0' -force
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarAnimations' -PropertyType dword -Value '1' -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' -Name 'VisualFXSetting' -PropertyType dword -Value '1' -force
+
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft' -Name 'GameBar' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\GameBar' -Name 'AllowAutoGameMode' -PropertyType dword -Value '1' -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\GameBar' -Name 'AutoGameModeEnabled' -PropertyType dword -Value '1' -force
+
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows' -Name 'AppPrivacy' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Policies\Microsoft\Windows\AppPrivacy' -Name 'LetAppsRunInBackground' -PropertyType dword -Value '2' -force
+
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft' -Name 'Internet Explorer' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Internet Explorer' -Name 'AdvancedOptions' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Internet Explorer\AdvancedOptions' -Name 'ACCELERATED_GRAPHICS' -ErrorAction SilentlyContinue
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Internet Explorer\AdvancedOptions\ACCELERATED_GRAPHICS' -Name 'USESWRENDER' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Internet Explorer\AdvancedOptions\ACCELERATED_GRAPHICS\USESWRENDER' -Name 'DefaultValue' -PropertyType dword -Value '1' -force
+
+powershell.exe New-Item -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Control Panel' -Name 'Desktop' -ErrorAction SilentlyContinue
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Control Panel\Desktop' -Name 'AutoColorization' -PropertyType String -Value '0' -force
+
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'legalnoticecaption' -PropertyType String -Value 'Windows 11 Pro Light Version' -force
+powershell.exe New-ItemProperty -Path 'HKLM:\MODSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'legalnoticetext' -PropertyType String -Value 'By Persona78' -force
+
+
+
+reg unload HKLM\MODSYSTEM
+reg unload HKLM\MODSOFTWARE
+
+pause
+
+goto gotAdmin
+
+::--------------------------------------------------------------------------------------
+
+:Dismount
+cls
+title Dismount Windows Image
+@echo. [32m
+rem powershell Dismount-WindowsImage -CheckIntegrity -Path "%~dp0PATH" -Save
+
+Dism /Image:"%~dp0PATH" /cleanup-image /StartComponentCleanup /ResetBase    
+Dism /Unmount-Image /MountDir:"%~dp0PATH" /Commit
+
+@echo. [0m
+@echo. [0m & @echo Done!!! & pause
+RD /S /Q ISO >NUL
+RD /S /Q PATH >NUL
+move /Y "WindowsOptionalFeature.txt" "%userprofile%\Desktop\WindowsOptionalFeature.txt"
+move /Y "ProvisionedAppxPackages.txt" "%userprofile%\Desktop\ProvisionedAppxPackages.txt"
+goto gotAdmin
+
+::-------------------------------------------------------------------------------------------
+
+:Split
+cls
+title Split Windows Image to be supported on FAT32
+@echo.
+@echo [32mFirst lets do backup from install.esd to %userprofile%\Desktop\install.esd_backup as BKinstall.esd.
+@echo [33mTo restore if need it rename to install.esd and restore to sources folder.[0m & @echo.
+mkdir "%userprofile%\Desktop\install.esd_backup"
+copy "%~dp0sources\install.esd" "%userprofile%\Desktop\install.esd_backup\BKinstall.esd"
+Dism.exe /Split-Image /ImageFile:%~dp0sources\install.esd /SWMFile:%~dp0sources\install.swm /FileSize:3072
+del /F /S /Q "%~dp0sources\install.esd"
+@echo. & @echo Done!
+pause
+goto gotAdmin
+
+::-------------------------------------------------------------------------------------------
+:clean
+cls
+title Clean all after work done
+del /F /S /Q "%userprofile%\Desktop\install.esd_backup\*"
+RD /S /Q "%userprofile%\Desktop\install.esd_backup"
+del /F /S /Q "%userprofile%\Desktop\WindowsOptionalFeature.txt" >NUL
+del /F /S /Q "%userprofile%\Desktop\ProvisionedAppxPackages.txt" >NUL
+@echo. & @echo [31mNow you can delete WINDOWS_MOD_TOOL.bat from working folder![0m & @echo.
+pause
+goto gotAdmin
+
+::-------------------------------------------------------------------------------------------
+::END
